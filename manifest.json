@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "Spotify Playlist Adder",
+  "version": "1.0",
+  "description": "現在再生中の曲をSpotifyプレイリストに追加する拡張機能",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "identity",
+    "tabCapture"
+  ],
+  "host_permissions": [
+    "https://*.spotify.com/*",
+    "https://api.spotify.com/*"
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "oauth2": {
+    "client_id": "883582714696-2jn1l3fssshpha0cm9pummnh36ldk6km.apps.googleusercontent.com",
+    "scopes": [
+      "https://www.googleapis.com/auth/userinfo.email",
+      "https://www.googleapis.com/auth/userinfo.profile"
+    ]
+  }
+}
