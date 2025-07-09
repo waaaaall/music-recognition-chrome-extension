@@ -38,7 +38,18 @@ async function getSpotifyToken() {
       return token.spotifyToken.accessToken;
     }
 
-    const authUrl = `${SPOTIFY_AUTH_URL}?client_id=${SPOTIFY_CLIENT_ID}&response_type=token&redirect_uri=${encodeURIComponent(SPOTIFY_REDIRECT_URI)}&scope=playlist-modify-public%20playlist-modify-private`;
+    // リフレッシュトークンがある場合は、それを使用して新しいアクセストークンを取得
+    if (token.spotifyToken?.refreshToken) {
+      try {
+        const newToken = await refreshSpotifyToken(token.spotifyToken.refreshToken);
+        return newToken.accessToken;
+      } catch (error) {
+        console.error('トークンのリフレッシュに失敗:', error);
+        // リフレッシュに失敗した場合は、通常の認証フローに進む
+      }
+    }
+
+    const authUrl = `${SPOTIFY_AUTH_URL}?client_id=${SPOTIFY_CLIENT_ID}&response_type=code&redirect_uri=${encodeURIComponent(SPOTIFY_REDIRECT_URI)}&scope=playlist-modify-public%20playlist-modify-private`;
 
     let redirectUrl;
     try {
@@ -55,30 +66,70 @@ async function getSpotifyToken() {
       throw new Error(ERROR_MESSAGES.NO_REDIRECT_URL);
     }
 
-    const hash = redirectUrl.split('#')[1];
-    if (!hash) {
+    const code = new URL(redirectUrl).searchParams.get('code');
+    if (!code) {
       throw new Error(ERROR_MESSAGES.INVALID_AUTH_RESPONSE);
     }
 
-    const params = new URLSearchParams(hash);
-    const accessToken = params.get('access_token');
-    const expiresIn = parseInt(params.get('expires_in'));
+    // 認証コードを使用してアクセストークンとリフレッシュトークンを取得
+    const tokenResponse = await fetch('https://accounts.spotify.com/api/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Authorization': 'Basic ' + btoa(SPOTIFY_CLIENT_ID + ':')
+      },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: code,
+        redirect_uri: SPOTIFY_REDIRECT_URI
+      })
+    });
 
-    if (!accessToken || !expiresIn) {
+    if (!tokenResponse.ok) {
       throw new Error(ERROR_MESSAGES.INVALID_TOKEN);
     }
 
-    const tokenData = {
-      accessToken,
-      expiresAt: Date.now() + expiresIn * 1000
+    const tokenData = await tokenResponse.json();
+    const tokenInfo = {
+      accessToken: tokenData.access_token,
+      refreshToken: tokenData.refresh_token,
+      expiresAt: Date.now() + tokenData.expires_in * 1000
     };
 
-    await chrome.storage.local.set({ spotifyToken: tokenData });
-    return accessToken;
+    await chrome.storage.local.set({ spotifyToken: tokenInfo });
+    return tokenInfo.accessToken;
   } catch (e) {
     console.error('認証エラー:', e);
     throw e;
   }
+}
+
+async function refreshSpotifyToken(refreshToken) {
+  const response = await fetch('https://accounts.spotify.com/api/token', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Authorization': 'Basic ' + btoa(SPOTIFY_CLIENT_ID + ':')
+    },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(ERROR_MESSAGES.INVALID_TOKEN);
+  }
+
+  const tokenData = await response.json();
+  const tokenInfo = {
+    accessToken: tokenData.access_token,
+    refreshToken: tokenData.refresh_token || refreshToken, // リフレッシュトークンは新しいものが提供されない場合があります
+    expiresAt: Date.now() + tokenData.expires_in * 1000
+  };
+
+  await chrome.storage.local.set({ spotifyToken: tokenInfo });
+  return tokenInfo;
 }
 
 async function fetchSpotifyApi(endpoint, options = {}) {
